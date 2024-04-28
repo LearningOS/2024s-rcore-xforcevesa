@@ -168,8 +168,7 @@ impl TaskManager {
         inner.tasks[cur].task_info.syscall_times[syscall_id % MAX_SYSCALL_NUM] += 1;
     }
 
-    /// Fetch the task info
-    pub fn fetch_task_info(&self) -> TaskInfo {
+    fn fetch_task_info(&self) -> TaskInfo {
         let inner = self.inner.exclusive_access();
         let cur = inner.current_task;
         let mut tt = inner.tasks[cur].task_info;
@@ -177,16 +176,14 @@ impl TaskManager {
         tt
     }
 
-    /// Perform mmap
-    pub fn current_task_memset_mmap(&self, start: usize, len: usize, port: usize) -> isize {
+    fn current_task_memset_mmap(&self, start: usize, len: usize, port: usize) -> isize {
         let mut inner = self.inner.exclusive_access();
         let cur = inner.current_task;
         let ms = &mut inner.tasks[cur].memory_set;
         ms.mmap(start, len, port)
     }
 
-    /// Perform munmap
-    pub fn current_task_memset_munmap(&self, start: usize, len: usize) -> isize {
+    fn current_task_memset_munmap(&self, start: usize, len: usize) -> isize {
         let mut inner = self.inner.exclusive_access();
         let cur = inner.current_task;
         let ms = &mut inner.tasks[cur].memory_set;
@@ -252,12 +249,12 @@ pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
 }
 
-/// Perform mmap for memset
+/// Alloc memory
 pub fn current_task_memset_mmap(start: usize, len: usize, port: usize) -> isize {
     TASK_MANAGER.current_task_memset_mmap(start, len, port)
 }
 
-/// Perform munmap for memset
+/// Free up memory
 pub fn current_task_memset_munmap(start: usize, len: usize) -> isize {
     TASK_MANAGER.current_task_memset_munmap(start, len)
 }

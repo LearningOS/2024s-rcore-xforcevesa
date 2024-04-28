@@ -160,6 +160,7 @@ impl PageTable {
         })
     }
 
+    #[allow(unused)]
     /// mmap operation
     pub fn mmap(&mut self, start: usize, len: usize, port: usize) -> isize {
         // Fetch the virtual addresses
@@ -202,6 +203,8 @@ impl PageTable {
         }
         0
     }
+    
+    #[allow(unused)]
     /// Do mummap
     pub fn munmap(&mut self, start: usize, len: usize) -> isize {
         let mut start_virt_addr = VirtPageNum(start);

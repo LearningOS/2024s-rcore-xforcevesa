@@ -63,19 +63,6 @@ impl MemorySet {
             None,
         );
     }
-    fn insert_and_map_framed_area(
-        &mut self,
-        start_va: VirtAddr,
-        end_va: VirtAddr,
-        permission: MapPermission
-    ) {
-        let mut map = MapArea::new(start_va, end_va, MapType::Framed, permission);
-        map.map(&mut self.page_table);
-        self.push(
-            map,
-            None,
-        );
-    }
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);
         if let Some(data) = data {
@@ -276,61 +263,89 @@ impl MemorySet {
         }
     }
 
-    /// mmap operation
+    /// Ferform mmap operation.
     pub fn mmap(&mut self, start: usize, len: usize, port: usize) -> isize {
-
+        // Fixed: Test 04_4 test
         if start % PAGE_SIZE != 0 {
             return -1;
         }
 
-        if port & !0x7 != 0 || port & 0x7 == 0 {
+        // port must be a positive integer less than 8 and non-zero
+        // port: [X, W, R]
+        if port > 8 || port == 0 {
             return -1;
         }
 
-        // Fetch the virtual addresses
-        let start_virt_addr = VirtAddr::from(start);
-        let end_virt_addr = VirtAddr::from(start + len);
+        let start_address = VirtAddr::from(start);
+        let end_address = VirtAddr::from(start + len);
+        
+        // find whether there are duplicated allocations.
+        let mut found = false;
 
-        // println!("start {:?} {}", start_virt_addr, start);
+        for area in self.areas.iter() {
+            let range_start = area.vpn_range.get_start();
+            let range_end = area.vpn_range.get_end();
+            // range (range_start, range_end) contains NONE of (start_address, end_address)
+            if range_end > start_address.floor() && range_start < end_address.ceil() {
+                found = true;
+            }
+        }
 
-        // Fetch the permission flag
+        if found {
+            return -1;
+        }
+
         let mut permission_flags = MapPermission::empty();
+        // Read permission
         if port & (1 << 0) != 0 {
             permission_flags |= MapPermission::R;
         }
+        // Write permission
         if port & (1 << 1) != 0 {
             permission_flags |= MapPermission::W;
         }
+        // Execute permission
         if port & (1 << 2) != 0 {
             permission_flags |= MapPermission::X;
         }
         permission_flags |= MapPermission::U;
-        // Find duplicate. If found, exit -1
-        if self.areas.iter().any(|area| {
-            area.vpn_range.get_end() > start_virt_addr.floor()
-                && area.vpn_range.get_start() < end_virt_addr.ceil()
-        }) {
-            return -1;
-        }
-        self.insert_and_map_framed_area(start_virt_addr, end_virt_addr, permission_flags);
+
+        self.insert_framed_area(start_address, end_address, permission_flags);
+
         0
     }
 
-    /// munmap operation
+    /// Ferform munmap operation.
     pub fn munmap(&mut self, start: usize, len: usize) -> isize {
-        let start_virt_addr = VirtAddr::from(start);
-        let end_virt_addr = VirtAddr::from(start + len);
-        // Find duplicate
-        let found = self.areas.iter().position(|area| {
-            area.vpn_range.get_start() <= start_virt_addr.floor() && area.vpn_range.get_end() >= end_virt_addr.ceil()
-        });
-        // If found, exit -1
-        if let None = found {
+        // Convert into VirtAddr
+        let start_address: VirtAddr = start.into();
+        let end_address: VirtAddr = (start + len).into();
+        // Fixed:  Test 04_6 failed
+        if !start_address.aligned() || !end_address.aligned() {
             return -1;
         }
-        let found = found.unwrap();
-        self.areas[found].unmap(&mut self.page_table);
-        self.areas.remove(found);
+        let virtual_page_start = start_address.floor();
+        let virtual_page_end = end_address.ceil();
+
+        let mut index: isize = 0;
+        let mut found_index: isize = -1;
+
+        // Traverse the areas and found the area containing the virtual memory address range
+        for area in self.areas.iter_mut() {
+            let range_start = area.vpn_range.get_start();
+            let range_end = area.vpn_range.get_end();
+            // range (range_start, range_end) contains (virtual_page_start, virtual_page_end)
+            if range_start <= virtual_page_start && range_end <= virtual_page_end {
+                found_index = index;
+            }
+            index += 1;
+        }
+
+        if found_index >= 0 {
+            let index = found_index as usize;
+            self.areas[index].unmap(&mut self.page_table);
+            self.areas.remove(index);
+        }
         0
     }
 }
