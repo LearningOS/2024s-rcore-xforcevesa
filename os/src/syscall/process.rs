@@ -2,14 +2,13 @@
 use crate::{
     config::MAX_SYSCALL_NUM,
     task::{
-        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, current_user_token
+        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next,
+        TaskStatus, current_user_token, current_task_memset_mmap, current_task_memset_munmap
     },
     mm::translated_refmut,
     timer::get_time_us,
     task::fetch_task_info
 };
-
-// pub use crate::mm::{page_table_mmap, page_table_munmap};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -81,18 +80,19 @@ pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
 }
 
 // YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     trace!("kernel: sys_mmap");
-    // page_table_mmap(current_user_token(), start, len, port);
-    -1
+    // page_table_mmap(current_user_token(), start, len, port)
+    current_task_memset_mmap(start, len, port)
 }
 
 // YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!("kernel: sys_munmap");
-    // page_table_munmap(current_user_token(), start, len);
-    -1
+    // page_table_munmap(current_user_token(), start, len)
+    current_task_memset_munmap(start, len)
 }
+
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {
     trace!("kernel: sys_sbrk");

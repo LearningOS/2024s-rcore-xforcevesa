@@ -1,11 +1,11 @@
 //! Implementation of [`PageTableEntry`] and [`PageTable`].
 
 use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
+use alloc::collections::BTreeMap;
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
 use super::PhysAddr;
-use crate::config::MEMORY_END;
 
 bitflags! {
     /// page table entry flags
@@ -70,6 +70,7 @@ impl PageTableEntry {
 pub struct PageTable {
     root_ppn: PhysPageNum,
     frames: Vec<FrameTracker>,
+    mem_map: BTreeMap<VirtPageNum, FrameTracker>
 }
 
 /// Assume that it won't oom when creating/mapping.
@@ -80,6 +81,7 @@ impl PageTable {
         PageTable {
             root_ppn: frame.ppn,
             frames: vec![frame],
+            mem_map: BTreeMap::new()
         }
     }
     /// Temporarily used to get arguments from user space.
@@ -87,6 +89,7 @@ impl PageTable {
         Self {
             root_ppn: PhysPageNum::from(satp & ((1usize << 44) - 1)),
             frames: Vec::new(),
+            mem_map: BTreeMap::new()
         }
     }
     /// Find PageTableEntry by VirtPageNum, create a frame for a 4KB page table if not exist
@@ -128,14 +131,12 @@ impl PageTable {
         result
     }
     /// set the map between virtual page number and physical page number
-    #[allow(unused)]
     pub fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
         let pte = self.find_pte_create(vpn).unwrap();
         assert!(!pte.is_valid(), "vpn {:?} is mapped before mapping", vpn);
         *pte = PageTableEntry::new(ppn, flags | PTEFlags::V);
     }
     /// remove the map between virtual page number and physical page number
-    #[allow(unused)]
     pub fn unmap(&mut self, vpn: VirtPageNum) {
         let pte = self.find_pte(vpn).unwrap();
         assert!(pte.is_valid(), "vpn {:?} is invalid before unmapping", vpn);
@@ -157,6 +158,66 @@ impl PageTable {
             let aligned_pa_usize: usize = aligned_pa.into();
             (aligned_pa_usize + offset).into()
         })
+    }
+
+    /// mmap operation
+    pub fn mmap(&mut self, start: usize, len: usize, port: usize) -> isize {
+        // Fetch the virtual addresses
+        let mut start_virt_addr = VirtPageNum(start);
+        let end_virt_addr = VirtPageNum(start + len);
+
+        println!("start {:?} {}", start_virt_addr, start);
+
+        // Fetch the permission flag
+        let mut permission_flags = PTEFlags::from_bits_truncate(port as u8);
+        if port & (1 << 0) != 0 {
+            permission_flags |= PTEFlags::R;
+        }
+        if port & (1 << 1) != 0 {
+            permission_flags |= PTEFlags::W;
+        }
+        if port & (1 << 2) != 0 {
+            permission_flags |= PTEFlags::X;
+        }
+        permission_flags |= PTEFlags::U;
+        permission_flags |= PTEFlags::V;
+        while start_virt_addr < end_virt_addr {
+            // If exist, return error.
+            if let Some(entry) = self.translate(start_virt_addr) {
+                if entry.is_valid() {
+                    println!("ERROR: ENTRY VALID {} IN {} - {}", start_virt_addr.0, start, start + len);
+                    return -1;
+                    // self.unmap(start_virt_addr);
+                }
+            }
+            // Allocate frame
+            if let Some(tracker) = frame_alloc() {
+                self.map(start_virt_addr, tracker.ppn, permission_flags);
+                self.mem_map.insert(start_virt_addr, tracker);
+            } else {
+                println!("ERROR: ALLOC NONE {} IN {} - {}", start_virt_addr.0, start, start + len);
+                return -1;
+            }
+            start_virt_addr.step();
+        }
+        0
+    }
+    /// Do mummap
+    pub fn munmap(&mut self, start: usize, len: usize) -> isize {
+        let mut start_virt_addr = VirtPageNum(start);
+        let end_virt_addr = VirtPageNum(start + len);
+        while start_virt_addr < end_virt_addr {
+            if let Some(entry) = self.translate(start_virt_addr) {
+                if !entry.is_valid() {
+                    println!("ERROR: ENTRY INVALID {} IN {} - {}", start_virt_addr.0, start, start + len);
+                    return -1;
+                }
+            }
+            self.unmap(start_virt_addr);
+            self.mem_map.remove(&start_virt_addr);
+            start_virt_addr.step();
+        }
+        0
     }
 }
 
@@ -193,22 +254,16 @@ pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> &'static mut T {
         .get_mut()
 }
 
+#[allow(unused)]
 /// Memory map
-pub fn page_table_mmap(token: usize, start: usize, len: usize, port: usize) {
+pub fn page_table_mmap(token: usize, start: usize, len: usize, port: usize) -> isize {
     let mut page_table = PageTable::from_token(token);
-    (start..start + len).for_each(|index|{
-        let vpn = VirtPageNum::from(index + len * 100000);
-        let ppn = PhysPageNum::from(index - start + MEMORY_END - (token * 1000) % (MEMORY_END / 10));
-        let flags = PTEFlags::from_bits((port & 0x7) as u8).unwrap();
-        page_table.map(vpn, ppn, flags);
-    })
+    page_table.mmap(start, len, port)
 }
 
+#[allow(unused)]
 /// Memory unmap
-pub fn page_table_munmap(token: usize, start: usize, len: usize) {
+pub fn page_table_munmap(token: usize, start: usize, len: usize) -> isize {
     let mut page_table = PageTable::from_token(token);
-    (start..start + len).for_each(|index|{
-        let vpn = VirtPageNum::from(index + len * 100000);
-        page_table.unmap(vpn);
-    })
+    page_table.munmap(start, len)
 }

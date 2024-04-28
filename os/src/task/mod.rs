@@ -176,6 +176,22 @@ impl TaskManager {
         tt.time = get_time_ms() - tt.time;
         tt
     }
+
+    /// Perform mmap
+    pub fn current_task_memset_mmap(&self, start: usize, len: usize, port: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        let ms = &mut inner.tasks[cur].memory_set;
+        ms.mmap(start, len, port)
+    }
+
+    /// Perform munmap
+    pub fn current_task_memset_munmap(&self, start: usize, len: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        let ms = &mut inner.tasks[cur].memory_set;
+        ms.munmap(start, len)
+    }
 }
 
 /// Run the first task in task list.
@@ -234,4 +250,14 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// Perform mmap for memset
+pub fn current_task_memset_mmap(start: usize, len: usize, port: usize) -> isize {
+    TASK_MANAGER.current_task_memset_mmap(start, len, port)
+}
+
+/// Perform munmap for memset
+pub fn current_task_memset_munmap(start: usize, len: usize) -> isize {
+    TASK_MANAGER.current_task_memset_munmap(start, len)
 }

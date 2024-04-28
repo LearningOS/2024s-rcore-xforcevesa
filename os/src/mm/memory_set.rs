@@ -63,6 +63,19 @@ impl MemorySet {
             None,
         );
     }
+    fn insert_and_map_framed_area(
+        &mut self,
+        start_va: VirtAddr,
+        end_va: VirtAddr,
+        permission: MapPermission
+    ) {
+        let mut map = MapArea::new(start_va, end_va, MapType::Framed, permission);
+        map.map(&mut self.page_table);
+        self.push(
+            map,
+            None,
+        );
+    }
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);
         if let Some(data) = data {
@@ -261,6 +274,64 @@ impl MemorySet {
         } else {
             false
         }
+    }
+
+    /// mmap operation
+    pub fn mmap(&mut self, start: usize, len: usize, port: usize) -> isize {
+
+        if start % PAGE_SIZE != 0 {
+            return -1;
+        }
+
+        if port & !0x7 != 0 || port & 0x7 == 0 {
+            return -1;
+        }
+
+        // Fetch the virtual addresses
+        let start_virt_addr = VirtAddr::from(start);
+        let end_virt_addr = VirtAddr::from(start + len);
+
+        // println!("start {:?} {}", start_virt_addr, start);
+
+        // Fetch the permission flag
+        let mut permission_flags = MapPermission::empty();
+        if port & (1 << 0) != 0 {
+            permission_flags |= MapPermission::R;
+        }
+        if port & (1 << 1) != 0 {
+            permission_flags |= MapPermission::W;
+        }
+        if port & (1 << 2) != 0 {
+            permission_flags |= MapPermission::X;
+        }
+        permission_flags |= MapPermission::U;
+        // Find duplicate. If found, exit -1
+        if self.areas.iter().any(|area| {
+            area.vpn_range.get_end() > start_virt_addr.floor()
+                && area.vpn_range.get_start() < end_virt_addr.ceil()
+        }) {
+            return -1;
+        }
+        self.insert_and_map_framed_area(start_virt_addr, end_virt_addr, permission_flags);
+        0
+    }
+
+    /// munmap operation
+    pub fn munmap(&mut self, start: usize, len: usize) -> isize {
+        let start_virt_addr = VirtAddr::from(start);
+        let end_virt_addr = VirtAddr::from(start + len);
+        // Find duplicate
+        let found = self.areas.iter().position(|area| {
+            area.vpn_range.get_start() <= start_virt_addr.floor() && area.vpn_range.get_end() >= end_virt_addr.ceil()
+        });
+        // If found, exit -1
+        if let None = found {
+            return -1;
+        }
+        let found = found.unwrap();
+        self.areas[found].unmap(&mut self.page_table);
+        self.areas.remove(found);
+        0
     }
 }
 /// map area structure, controls a contiguous piece of virtual memory
