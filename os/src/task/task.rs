@@ -9,6 +9,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefMut;
 use crate::config::MAX_SYSCALL_NUM;
+use crate::loader::get_app_data_by_name;
 
 /// Task control block structure
 ///
@@ -23,6 +24,9 @@ pub struct TaskControlBlock {
 
     /// Mutable
     inner: UPSafeCell<TaskControlBlockInner>,
+
+    /// Priority stride
+    pub stride: Stride
 }
 
 impl TaskControlBlock {
@@ -126,9 +130,10 @@ impl TaskControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     heap_bottom: user_sp,
-                    program_brk: user_sp,
+                    program_brk: user_sp
                 })
             },
+            stride: Stride::new()
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
@@ -201,9 +206,10 @@ impl TaskControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
-                    program_brk: parent_inner.program_brk,
+                    program_brk: parent_inner.program_brk
                 })
             },
+            stride: Stride::new()
         });
         // add child
         parent_inner.children.push(task_control_block.clone());
@@ -215,6 +221,17 @@ impl TaskControlBlock {
         task_control_block
         // **** release child PCB
         // ---- release parent PCB
+    }
+
+    /// Spawn
+    pub fn spawn(self: &Arc<Self>, path: &str) -> Option<Arc<Self>> {
+        let name = path;
+        let ret = Arc::new(TaskControlBlock::new(
+            get_app_data_by_name(name).unwrap()
+        ));
+        let mut parent_inner = self.inner_exclusive_access();
+        parent_inner.children.push(ret.clone());
+        Some(ret)
     }
 
     /// get pid of process
@@ -246,6 +263,50 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+
+    /// Set priority
+    pub fn set_priority(self: &mut Arc<Self>, p: usize) -> usize {
+        unsafe {
+            Arc::get_mut_unchecked(self).stride.set_priority(p)
+        }
+        p
+    }
+}
+
+pub struct Stride {
+    stride: usize,
+    priority: usize,
+    big_stride: usize
+}
+
+use core::cmp::{PartialEq, Ordering};
+
+impl PartialEq for Stride {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl PartialOrd for Stride {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        PartialOrd::partial_cmp(&self.stride, &other.stride)
+    }
+}
+
+impl Stride {
+    pub fn new() -> Self {
+        Self {
+            stride: 0,
+            priority: 16,
+            big_stride: 0x100000000
+        }
+    }
+    pub fn set_priority(&mut self, p: usize) {
+        self.priority = p;
+    }
+    pub fn accumulate(&mut self) {
+        self.stride += self.big_stride / self.priority
     }
 }
 
