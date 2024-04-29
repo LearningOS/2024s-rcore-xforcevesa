@@ -8,6 +8,7 @@ use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefMut;
+use crate::config::MAX_SYSCALL_NUM;
 
 /// Task control block structure
 ///
@@ -49,6 +50,12 @@ pub struct TaskControlBlockInner {
 
     /// Maintain the execution status of the current process
     pub task_status: TaskStatus,
+
+    /// The numbers of syscall called by task
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
+
+    /// Total running time of task
+    pub time: usize,
 
     /// Application address space
     pub memory_set: MemorySet,
@@ -113,6 +120,8 @@ impl TaskControlBlock {
                     task_cx: TaskContext::goto_trap_return(kernel_stack_top),
                     task_status: TaskStatus::Ready,
                     memory_set,
+                    time: 0,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
                     parent: None,
                     children: Vec::new(),
                     exit_code: 0,
@@ -185,6 +194,8 @@ impl TaskControlBlock {
                     base_size: parent_inner.base_size,
                     task_cx: TaskContext::goto_trap_return(kernel_stack_top),
                     task_status: TaskStatus::Ready,
+                    time: 0,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
                     memory_set,
                     parent: Some(Arc::downgrade(self)),
                     children: Vec::new(),
