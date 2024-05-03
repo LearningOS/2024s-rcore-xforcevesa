@@ -55,6 +55,30 @@ pub fn suspend_current_and_run_next() {
     schedule(task_cx_ptr);
 }
 
+/// TODO: implement task_mmap
+pub fn task_mmap(start: usize, len: usize, flag: usize) -> isize {
+    // There must be an application running.
+    let task = current_task().unwrap();
+
+    // ---- access current TCB exclusively
+    let mut task_inner = task.inner_exclusive_access();
+
+    let memset = &mut task_inner.memory_set;
+    memset.mmap(start, len, flag)
+}
+
+/// TODO: implement task_munmap
+pub fn task_munmap(start: usize, len: usize) -> isize {
+    // There must be an application running.
+    let task = current_task().unwrap();
+
+    // ---- access current TCB exclusively
+    let mut task_inner = task.inner_exclusive_access();
+
+    let memset = &mut task_inner.memory_set;
+    memset.munmap(start, len)
+}
+
 /// pid of usertests app in make run TEST=1
 pub const IDLE_PID: usize = 0;
 
