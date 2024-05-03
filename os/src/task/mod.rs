@@ -96,10 +96,8 @@ pub fn task_set_priority(p: isize) -> isize {
 }
 
 /// TODO: implement task_spawn
-pub fn task_spawn(path: &str) -> Option<Arc<TaskControlBlock>> {
-    let app_inode = open_file(path, OpenFlags::RDONLY)?;
-    
-    let elf_data = app_inode.read_all();
+pub fn task_spawn(elf_data: &[u8], path: &str) -> Option<Arc<TaskControlBlock>> {
+    assert_ne!(elf_data.len(), 0, "data length of elf file {} is {}", path, elf_data.len());
 
     let current_task = current_task().unwrap();
     let new_task = Arc::new(TaskControlBlock::new(&elf_data));

@@ -154,7 +154,7 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     trace!(
-        "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_task_info",
         current_task().unwrap().pid.0
     );
     *translated_refmut(current_user_token(), ti) = task_get_info();
@@ -197,19 +197,37 @@ pub fn sys_spawn(path: *const u8) -> isize {
         current_task().unwrap().pid.0
     );
     let path = translated_str(current_user_token(), path);
-    if let Some(task) = task_spawn(path.as_str()) {
+    let app_inode = open_file(path.as_str(), OpenFlags::RDONLY).unwrap();
+    let elf_data = app_inode.read_all();
+    if let Some(task) = task_spawn(&elf_data, path.as_str()) {
         let ret = task.pid.0 as isize;
         add_task(task);
         ret
     } else {
         -1
     }
+    // if let Some(inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
+    //     let elf_data = inode.read_all();
+
+    //     assert_ne!(elf_data.len(), 0, "data length of elf file {} is {}", path, elf_data.len());
+
+    //     let current_task = current_task().unwrap();
+    //     let new_task = Arc::new(TaskControlBlock::new(&elf_data));
+
+    //     current_task.inner_exclusive_access().children.push(new_task.clone());
+    //     new_task.inner_exclusive_access().parent = Some(Arc::downgrade(&current_task));
+    //     let ret = new_task.pid.0 as isize;
+    //     add_task(new_task);
+    //     ret
+    // } else {
+    //     -1
+    // }
 }
 
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(prio: isize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_set_priority",
         current_task().unwrap().pid.0
     );
     task_set_priority(prio)
