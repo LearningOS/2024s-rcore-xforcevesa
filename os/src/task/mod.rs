@@ -22,7 +22,7 @@ mod switch;
 #[allow(rustdoc::private_intra_doc_links)]
 mod task;
 
-use crate::fs::{open_file, OpenFlags};
+use crate::{fs::{open_file, OpenFlags}, syscall::TaskInfo};
 use alloc::sync::Arc;
 pub use context::TaskContext;
 use lazy_static::*;
@@ -45,7 +45,7 @@ pub fn suspend_current_and_run_next() {
     let mut task_inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
     // Change status to Ready
-    task_inner.task_status = TaskStatus::Ready;
+    task_inner.task_info.status = TaskStatus::Ready;
     drop(task_inner);
     // ---- release current PCB
 
@@ -79,6 +79,31 @@ pub fn task_munmap(start: usize, len: usize) -> isize {
     memset.munmap(start, len)
 }
 
+/// TODO: implement task_get_info
+pub fn task_get_info() -> TaskInfo {
+    // There must be an application running.
+    let task = current_task().unwrap();
+
+    task.get_task_info()
+}
+
+/// TODO: implement task_set_priority
+pub fn task_set_priority(p: isize) -> isize {
+    // There must be an application running.
+    let mut task = current_task().unwrap();
+
+    task.set_priority(p)
+}
+
+/// TODO: implement task_trace_syscall
+pub fn task_trace_syscall(syscall_id: usize) {
+    // There must be an application running.
+    let task = current_task().unwrap();
+
+    // ---- access current TCB exclusively
+    task.trace_syscall(syscall_id)
+}
+
 /// pid of usertests app in make run TEST=1
 pub const IDLE_PID: usize = 0;
 
@@ -99,7 +124,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     // **** access current TCB exclusively
     let mut inner = task.inner_exclusive_access();
     // Change status to Zombie
-    inner.task_status = TaskStatus::Zombie;
+    inner.task_info.status = TaskStatus::Zombie;
     // Record exit code
     inner.exit_code = exit_code;
     // do not move to its parent but under initproc

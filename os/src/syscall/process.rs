@@ -7,8 +7,8 @@ use crate::{
     fs::{open_file, OpenFlags},
     mm::{translated_refmut, translated_str},
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, task_mmap, task_munmap, TaskStatus
-    },
+        add_task, current_task, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, task_get_info, task_mmap, task_munmap, task_set_priority, TaskStatus
+    }, timer::get_time_us,
 };
 
 #[repr(C)]
@@ -20,13 +20,34 @@ pub struct TimeVal {
 
 /// Task information
 #[allow(dead_code)]
+#[derive(Clone, Copy)]
 pub struct TaskInfo {
     /// Task status in it's life cycle
-    status: TaskStatus,
+    pub status: TaskStatus,
     /// The numbers of syscall called by task
-    syscall_times: [u32; MAX_SYSCALL_NUM],
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
     /// Total running time of task
-    time: usize,
+    pub time: usize,
+}
+
+impl TaskInfo {
+    /// Create a new TaskInfo with default values
+    pub fn new() -> Self {
+        Self {
+            status: TaskStatus::UnInit,
+            syscall_times: [0; MAX_SYSCALL_NUM],
+            time: 0
+        }
+    }
+
+    /// Create a new TaskInfo with given status
+    pub fn new_s(status: TaskStatus) -> Self {
+        Self {
+            status,
+            syscall_times: [0; MAX_SYSCALL_NUM],
+            time: 0
+        }
+    }
 }
 
 pub fn sys_exit(exit_code: i32) -> ! {
@@ -118,21 +139,26 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_get_time",
         current_task().unwrap().pid.0
     );
-    -1
+    let us = get_time_us();
+    let sec = us / 1000000;
+    let usec = us % 1000000;
+    *translated_refmut(current_user_token(), _ts) = TimeVal { sec, usec };
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
-pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
+pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     trace!(
         "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    *translated_refmut(current_user_token(), ti) = task_get_info();
+    0
 }
 
 /// YOUR JOB: Implement mmap.
@@ -174,10 +200,10 @@ pub fn sys_spawn(_path: *const u8) -> isize {
 }
 
 // YOUR JOB: Set task priority.
-pub fn sys_set_priority(_prio: isize) -> isize {
+pub fn sys_set_priority(prio: isize) -> isize {
     trace!(
         "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    task_set_priority(prio)
 }

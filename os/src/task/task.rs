@@ -5,6 +5,8 @@ use crate::config::TRAP_CONTEXT_BASE;
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
+use crate::syscall::TaskInfo;
+use crate::timer::get_time_ms;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
@@ -24,6 +26,9 @@ pub struct TaskControlBlock {
 
     /// Mutable
     inner: UPSafeCell<TaskControlBlockInner>,
+
+    /// Priority stride
+    pub stride: Stride
 }
 
 impl TaskControlBlock {
@@ -50,7 +55,7 @@ pub struct TaskControlBlockInner {
     pub task_cx: TaskContext,
 
     /// Maintain the execution status of the current process
-    pub task_status: TaskStatus,
+    pub task_info: TaskInfo,
 
     /// Application address space
     pub memory_set: MemorySet,
@@ -81,7 +86,7 @@ impl TaskControlBlockInner {
         self.memory_set.token()
     }
     fn get_status(&self) -> TaskStatus {
-        self.task_status
+        self.task_info.status
     }
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
@@ -120,7 +125,7 @@ impl TaskControlBlock {
                     trap_cx_ppn,
                     base_size: user_sp,
                     task_cx: TaskContext::goto_trap_return(kernel_stack_top),
-                    task_status: TaskStatus::Ready,
+                    task_info: TaskInfo::new_s(TaskStatus::Ready),
                     memory_set,
                     parent: None,
                     children: Vec::new(),
@@ -137,6 +142,7 @@ impl TaskControlBlock {
                     program_brk: user_sp,
                 })
             },
+            stride: Stride::new()
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
@@ -208,7 +214,7 @@ impl TaskControlBlock {
                     trap_cx_ppn,
                     base_size: parent_inner.base_size,
                     task_cx: TaskContext::goto_trap_return(kernel_stack_top),
-                    task_status: TaskStatus::Ready,
+                    task_info: TaskInfo::new_s(TaskStatus::Ready),
                     memory_set,
                     parent: Some(Arc::downgrade(self)),
                     children: Vec::new(),
@@ -218,6 +224,7 @@ impl TaskControlBlock {
                     program_brk: parent_inner.program_brk,
                 })
             },
+            stride: Stride::new()
         });
         // add child
         parent_inner.children.push(task_control_block.clone());
@@ -260,6 +267,77 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+
+    /// trace the system call of the current process
+    /// return the system call number and the arguments
+    pub fn trace_syscall(&self, syscall_id: usize) {
+        let mut inner = self.inner_exclusive_access();
+        let info = &mut inner.task_info;
+        info.syscall_times[syscall_id] += 1;
+    }
+
+    /// fetch the task info of the current process
+    /// return the task info
+    pub fn get_task_info(&self) -> TaskInfo {
+        let inner = self.inner_exclusive_access();
+        let mut info = inner.task_info.clone();
+        info.time = get_time_ms() - info.time;
+        info
+    }
+
+    /// Set priority
+    pub fn set_priority(self: &mut Arc<Self>, p: isize) -> isize {
+        if p <= 2 {
+            return -1;
+        }
+        unsafe {
+            Arc::get_mut_unchecked(self).stride.set_priority(p as usize)
+        }
+        p as isize
+    }
+
+    /// accumulate the stride of the current process
+    pub fn stride_accumulate(self: &mut Arc<Self>) {
+        unsafe {
+            Arc::get_mut_unchecked(self).stride.accumulate()
+        }
+    }
+}
+
+pub struct Stride {
+    stride: usize,
+    priority: usize,
+    big_stride: usize
+}
+
+use core::cmp::{PartialEq, Ordering};
+
+impl PartialEq for Stride {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl PartialOrd for Stride {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        PartialOrd::partial_cmp(&self.stride, &other.stride)
+    }
+}
+
+impl Stride {
+    pub fn new() -> Self {
+        Self {
+            stride: 0,
+            priority: 16,
+            big_stride: 0x100000000
+        }
+    }
+    pub fn set_priority(&mut self, p: usize) {
+        self.priority = p;
+    }
+    pub fn accumulate(&mut self) {
+        self.stride += self.big_stride / self.priority
     }
 }
 
