@@ -7,7 +7,7 @@ use crate::{
     fs::{open_file, OpenFlags},
     mm::{translated_refmut, translated_str},
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, task_get_info, task_mmap, task_munmap, task_set_priority, TaskStatus
+        add_task, current_task, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, task_get_info, task_mmap, task_munmap, task_set_priority, task_spawn, TaskStatus
     }, timer::get_time_us,
 };
 
@@ -191,12 +191,19 @@ pub fn sys_sbrk(size: i32) -> isize {
 
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
+pub fn sys_spawn(path: *const u8) -> isize {
     trace!(
         "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let path = translated_str(current_user_token(), path);
+    if let Some(task) = task_spawn(path.as_str()) {
+        let ret = task.pid.0 as isize;
+        add_task(task);
+        ret
+    } else {
+        -1
+    }
 }
 
 // YOUR JOB: Set task priority.

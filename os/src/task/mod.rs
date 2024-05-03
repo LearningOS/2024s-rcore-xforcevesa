@@ -95,6 +95,21 @@ pub fn task_set_priority(p: isize) -> isize {
     task.set_priority(p)
 }
 
+/// TODO: implement task_spawn
+pub fn task_spawn(path: &str) -> Option<Arc<TaskControlBlock>> {
+    let app_inode = open_file(path, OpenFlags::RDONLY)?;
+    
+    let elf_data = app_inode.read_all();
+
+    let current_task = current_task().unwrap();
+    let new_task = Arc::new(TaskControlBlock::new(&elf_data));
+
+    current_task.inner_exclusive_access().children.push(new_task.clone());
+    new_task.inner_exclusive_access().parent = Some(Arc::downgrade(&current_task));
+
+    Some(new_task)
+}
+
 /// TODO: implement task_trace_syscall
 pub fn task_trace_syscall(syscall_id: usize) {
     // There must be an application running.
