@@ -24,7 +24,7 @@
 #![no_main]
 #![feature(panic_info_message)]
 #![feature(alloc_error_handler)]
-#![feature(get_mut_unchecked)]
+#![feature(extend_one)]
 
 #[macro_use]
 extern crate bitflags;

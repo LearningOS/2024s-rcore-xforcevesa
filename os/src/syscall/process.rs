@@ -7,14 +7,20 @@ use crate::{
     fs::{open_file, OpenFlags},
     mm::{translated_refmut, translated_str},
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, task_get_info, task_mmap, task_munmap, task_set_priority, task_spawn, TaskStatus
-    }, timer::get_time_us,
+        add_task, current_task, current_user_token,
+        exit_current_and_run_next,
+        suspend_current_and_run_next, TaskStatus,
+    },
+    timer::get_time_us,
 };
 
 #[repr(C)]
 #[derive(Debug)]
+/// Time value structure
 pub struct TimeVal {
+    /// Seconds
     pub sec: usize,
+    /// Microseconds
     pub usec: usize,
 }
 
@@ -50,23 +56,27 @@ impl TaskInfo {
     }
 }
 
+/// Exit the current task and run the next task in the scheduler.
 pub fn sys_exit(exit_code: i32) -> ! {
     trace!("kernel:pid[{}] sys_exit", current_task().unwrap().pid.0);
     exit_current_and_run_next(exit_code);
     panic!("Unreachable in sys_exit!");
 }
 
+/// Yield the current task to the next task in the scheduler.
 pub fn sys_yield() -> isize {
     //trace!("kernel: sys_yield");
     suspend_current_and_run_next();
     0
 }
 
+/// Get the current task's pid.
 pub fn sys_getpid() -> isize {
     trace!("kernel: sys_getpid pid:{}", current_task().unwrap().pid.0);
     current_task().unwrap().pid.0 as isize
 }
 
+/// Fork the current task and create a new task.
 pub fn sys_fork() -> isize {
     trace!("kernel:pid[{}] sys_fork", current_task().unwrap().pid.0);
     let current_task = current_task().unwrap();
@@ -82,6 +92,7 @@ pub fn sys_fork() -> isize {
     new_pid as isize
 }
 
+/// Exec a new program in the current task.
 pub fn sys_exec(path: *const u8) -> isize {
     trace!("kernel:pid[{}] sys_exec", current_task().unwrap().pid.0);
     let token = current_user_token();
@@ -137,15 +148,16 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time",
-        current_task().unwrap().pid.0
-    );
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
+    trace!("kernel: sys_get_time");
+
     let us = get_time_us();
-    let sec = us / 1000000;
-    let usec = us % 1000000;
-    *translated_refmut(current_user_token(), _ts) = TimeVal { sec, usec };
+
+    *translated_refmut(current_user_token(), ts) = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+
     0
 }
 
@@ -157,7 +169,10 @@ pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
         "kernel:pid[{}] sys_task_info",
         current_task().unwrap().pid.0
     );
-    *translated_refmut(current_user_token(), ti) = task_get_info();
+
+    *translated_refmut(current_user_token(), ti) = 
+            current_task().unwrap().get_task_info();
+
     0
 }
 
@@ -167,7 +182,11 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
         "kernel:pid[{}] sys_mmap",
         current_task().unwrap().pid.0
     );
-    task_mmap(start, len, port)
+
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+
+    task_inner.memory_set.mmap(start, len, port)
 }
 
 /// YOUR JOB: Implement munmap.
@@ -176,7 +195,11 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
         "kernel:pid[{}] sys_munmap",
         current_task().unwrap().pid.0
     );
-    task_munmap(start, len)
+
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+
+    task_inner.memory_set.munmap(start, len)
 }
 
 /// change data segment size
@@ -193,42 +216,28 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// HINT: fork + exec =/= spawn
 pub fn sys_spawn(path: *const u8) -> isize {
     trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_spawn",
         current_task().unwrap().pid.0
     );
+
     let path = translated_str(current_user_token(), path);
-    let app_inode = open_file(path.as_str(), OpenFlags::RDONLY).unwrap();
-    let elf_data = app_inode.read_all();
-    if let Some(task) = task_spawn(&elf_data, path.as_str()) {
-        let ret = task.pid.0 as isize;
-        add_task(task);
-        ret
+    if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
+        let elf_data = app_inode.read_all();
+        let task = current_task().unwrap().spawn(&elf_data);
+        add_task(task.clone());
+        task.pid.0 as isize
     } else {
         -1
     }
-    // if let Some(inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
-    //     let elf_data = inode.read_all();
-
-    //     assert_ne!(elf_data.len(), 0, "data length of elf file {} is {}", path, elf_data.len());
-
-    //     let current_task = current_task().unwrap();
-    //     let new_task = Arc::new(TaskControlBlock::new(&elf_data));
-
-    //     current_task.inner_exclusive_access().children.push(new_task.clone());
-    //     new_task.inner_exclusive_access().parent = Some(Arc::downgrade(&current_task));
-    //     let ret = new_task.pid.0 as isize;
-    //     add_task(new_task);
-    //     ret
-    // } else {
-    //     -1
-    // }
 }
 
-// YOUR JOB: Set task priority.
+/// Implement set_priority.
 pub fn sys_set_priority(prio: isize) -> isize {
     trace!(
         "kernel:pid[{}] sys_set_priority",
         current_task().unwrap().pid.0
     );
-    task_set_priority(prio)
+
+    let mut task = current_task().unwrap();
+    task.set_priority(prio)
 }

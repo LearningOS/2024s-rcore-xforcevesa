@@ -22,7 +22,7 @@ mod switch;
 #[allow(rustdoc::private_intra_doc_links)]
 mod task;
 
-use crate::{fs::{open_file, OpenFlags}, syscall::TaskInfo};
+use crate::fs::{open_file, OpenFlags};
 use alloc::sync::Arc;
 pub use context::TaskContext;
 use lazy_static::*;
@@ -33,8 +33,8 @@ pub use task::{TaskControlBlock, TaskStatus};
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use manager::add_task;
 pub use processor::{
-    current_task, current_trap_cx, current_user_token, run_tasks, schedule, take_current_task,
-    Processor,
+    current_task, current_trap_cx, current_user_token,
+    run_tasks, schedule, take_current_task, trace_syscall, Processor,
 };
 /// Suspend the current 'Running' task and run the next task in task list.
 pub fn suspend_current_and_run_next() {
@@ -53,68 +53,6 @@ pub fn suspend_current_and_run_next() {
     add_task(task);
     // jump to scheduling cycle
     schedule(task_cx_ptr);
-}
-
-/// TODO: implement task_mmap
-pub fn task_mmap(start: usize, len: usize, flag: usize) -> isize {
-    // There must be an application running.
-    let task = current_task().unwrap();
-
-    // ---- access current TCB exclusively
-    let mut task_inner = task.inner_exclusive_access();
-
-    let memset = &mut task_inner.memory_set;
-    memset.mmap(start, len, flag)
-}
-
-/// TODO: implement task_munmap
-pub fn task_munmap(start: usize, len: usize) -> isize {
-    // There must be an application running.
-    let task = current_task().unwrap();
-
-    // ---- access current TCB exclusively
-    let mut task_inner = task.inner_exclusive_access();
-
-    let memset = &mut task_inner.memory_set;
-    memset.munmap(start, len)
-}
-
-/// TODO: implement task_get_info
-pub fn task_get_info() -> TaskInfo {
-    // There must be an application running.
-    let task = current_task().unwrap();
-
-    task.get_task_info()
-}
-
-/// TODO: implement task_set_priority
-pub fn task_set_priority(p: isize) -> isize {
-    // There must be an application running.
-    let mut task = current_task().unwrap();
-
-    task.set_priority(p)
-}
-
-/// TODO: implement task_spawn
-pub fn task_spawn(elf_data: &[u8], path: &str) -> Option<Arc<TaskControlBlock>> {
-    assert_ne!(elf_data.len(), 0, "data length of elf file {} is {}", path, elf_data.len());
-
-    let current_task = current_task().unwrap();
-    let new_task = Arc::new(TaskControlBlock::new(&elf_data));
-
-    current_task.inner_exclusive_access().children.push(new_task.clone());
-    new_task.inner_exclusive_access().parent = Some(Arc::downgrade(&current_task));
-
-    Some(new_task)
-}
-
-/// TODO: implement task_trace_syscall
-pub fn task_trace_syscall(syscall_id: usize) {
-    // There must be an application running.
-    let task = current_task().unwrap();
-
-    // ---- access current TCB exclusively
-    task.trace_syscall(syscall_id)
 }
 
 /// pid of usertests app in make run TEST=1

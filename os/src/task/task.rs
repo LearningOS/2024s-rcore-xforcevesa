@@ -1,11 +1,11 @@
 //! Types related to task management & Functions for completely changing TCB
-use super::TaskContext;
+use super::{current_task, TaskContext};
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
-use crate::syscall::TaskInfo;
+use crate::syscall::process::TaskInfo;
 use crate::timer::get_time_ms;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
@@ -27,8 +27,11 @@ pub struct TaskControlBlock {
     /// Mutable
     inner: UPSafeCell<TaskControlBlockInner>,
 
-    /// Priority stride
-    pub stride: Stride
+    /// The stride of the task
+    pub stride: isize,
+
+    /// The priority of the task
+    pub priority: isize,
 }
 
 impl TaskControlBlock {
@@ -69,6 +72,8 @@ pub struct TaskControlBlockInner {
 
     /// It is set when active exit or execution error occurs
     pub exit_code: i32,
+
+    /// File Descriptor Table: Record the files opened by this task
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
 
     /// Heap bottom
@@ -139,10 +144,11 @@ impl TaskControlBlock {
                         Some(Arc::new(Stdout)),
                     ],
                     heap_bottom: user_sp,
-                    program_brk: user_sp,
+                    program_brk: user_sp
                 })
             },
-            stride: Stride::new()
+            stride: 0,
+            priority: 0,
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
@@ -221,10 +227,11 @@ impl TaskControlBlock {
                     exit_code: 0,
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
-                    program_brk: parent_inner.program_brk,
+                    program_brk: parent_inner.program_brk
                 })
             },
-            stride: Stride::new()
+            stride: self.stride,
+            priority: self.priority,
         });
         // add child
         parent_inner.children.push(task_control_block.clone());
@@ -269,75 +276,38 @@ impl TaskControlBlock {
         }
     }
 
-    /// trace the system call of the current process
-    /// return the system call number and the arguments
-    pub fn trace_syscall(&self, syscall_id: usize) {
-        let mut inner = self.inner_exclusive_access();
-        let info = &mut inner.task_info;
-        info.syscall_times[syscall_id] += 1;
+    /// Run a child process in current process
+    pub fn spawn(&self, elf_data: &[u8]) -> Arc<TaskControlBlock> {
+        let current_task = current_task().unwrap();
+        let new_task = Arc::new(TaskControlBlock::new(&elf_data));
+
+        current_task.inner_exclusive_access().children.push(new_task.clone());
+        new_task.inner_exclusive_access().parent = Some(Arc::downgrade(&current_task));
+
+        new_task
+    } 
+
+    /// set the priority of the task
+    pub fn set_priority(self: &mut Arc<TaskControlBlock>, priority: isize) -> isize {
+        if priority < 2 {
+            return -1;
+        }
+        let aa = Arc::get_mut(self).unwrap();
+        aa.priority = priority;
+        priority
     }
 
-    /// fetch the task info of the current process
-    /// return the task info
+    /// fetch the task info
     pub fn get_task_info(&self) -> TaskInfo {
-        let inner = self.inner_exclusive_access();
-        let mut info = inner.task_info.clone();
+        let mut info = self.inner_exclusive_access().task_info;
         info.time = get_time_ms() - info.time;
         info
     }
 
-    /// Set priority
-    pub fn set_priority(self: &mut Arc<Self>, p: isize) -> isize {
-        if p <= 2 {
-            return -1;
-        }
-        unsafe {
-            Arc::get_mut_unchecked(self).stride.set_priority(p as usize)
-        }
-        p as isize
-    }
-
-    /// accumulate the stride of the current process
-    pub fn stride_accumulate(self: &mut Arc<Self>) {
-        unsafe {
-            Arc::get_mut_unchecked(self).stride.accumulate()
-        }
-    }
-}
-
-pub struct Stride {
-    stride: usize,
-    priority: usize,
-    big_stride: usize
-}
-
-use core::cmp::{PartialEq, Ordering};
-
-impl PartialEq for Stride {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
-
-impl PartialOrd for Stride {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        PartialOrd::partial_cmp(&self.stride, &other.stride)
-    }
-}
-
-impl Stride {
-    pub fn new() -> Self {
-        Self {
-            stride: 0,
-            priority: 16,
-            big_stride: 0x100000000
-        }
-    }
-    pub fn set_priority(&mut self, p: usize) {
-        self.priority = p;
-    }
-    pub fn accumulate(&mut self) {
-        self.stride += self.big_stride / self.priority
+    /// trace the system call of the task
+    pub fn trace_syscall(&self, syscall_num: usize) {
+        let mut inner = self.inner_exclusive_access();
+        inner.task_info.syscall_times[syscall_num] += 1;
     }
 }
 

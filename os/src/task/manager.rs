@@ -1,40 +1,12 @@
 //!Implementation of [`TaskManager`]
-use core::cmp::Ordering;
-
-use super::TaskControlBlock;
+use super::{TaskControlBlock, TaskStatus};
 use crate::sync::UPSafeCell;
-use alloc::collections::BinaryHeap;
+use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use lazy_static::*;
 ///A array of `TaskControlBlock` that is thread-safe
 pub struct TaskManager {
-    // ready_queue: VecDeque<Arc<TaskControlBlock>>,
-    heap: BinaryHeap<Arc<TaskControlBlock>>
-}
-
-impl PartialOrd for TaskControlBlock {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        PartialOrd::partial_cmp(&self.stride, &other.stride)
-    }
-}
-
-impl PartialEq for TaskControlBlock {
-    fn eq(&self, _: &Self) -> bool {
-        false
-    }
-}
-
-impl Ord for TaskControlBlock {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        match PartialOrd::partial_cmp(&self.stride, &other.stride) {
-            Some(t) => t,
-            None => Ordering::Equal
-        }
-    }
-}
-
-impl Eq for TaskControlBlock {
-    
+    ready_queue: VecDeque<Arc<TaskControlBlock>>,
 }
 
 /// A simple FIFO scheduler.
@@ -42,18 +14,24 @@ impl TaskManager {
     ///Creat an empty TaskManager
     pub fn new() -> Self {
         Self {
-            // ready_queue: VecDeque::new(),
-            heap: BinaryHeap::new()
+            ready_queue: VecDeque::new(),
         }
     }
     /// Add process back to ready queue
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
-        // self.ready_queue.push_back(task);
-        self.heap.push(task);
+        self.ready_queue.push_back(task);
     }
     /// Take a process out of the ready queue
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.heap.pop()
+        let min_index = self
+            .ready_queue
+            .iter()
+            .enumerate()
+            .filter(|(_, task)| task.inner_exclusive_access().task_info.status == TaskStatus::Ready)
+            .min_by_key(|(_, task)| task.stride)
+            .unwrap();
+
+        self.ready_queue.remove(min_index.0)
     }
 }
 

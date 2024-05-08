@@ -113,3 +113,8 @@ pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
         __switch(switched_task_cx_ptr, idle_task_cx_ptr);
     }
 }
+
+/// Update task info
+pub fn trace_syscall(syscall_id: usize) {
+    current_task().unwrap().trace_syscall(syscall_id)
+}
